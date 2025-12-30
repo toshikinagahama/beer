@@ -5,22 +5,22 @@ w1=$((W_TER * 30 / 100))                          #計算用w
 readonly MIN_W_MUG=$((w1 % 2 == 0 ? w1 : w1 + 1)) #ビールジョッキの最大の横幅（形は後で変える）必ず偶数
 readonly H_MUG=$((H_TER * 40 / 100))              #ビールジョッキの縦幅
 readonly Y_BOTTOM=$((H_TER - 5))                  #ジョッキの底の位置
-readonly YELLOW="\033[33m"                        #黄色
-readonly BLUE="\033[34m"                          #黄色
-readonly WHITE="\033[37m"                         #白色
-readonly RESET="\033[0m"                          #リセット
 readonly POUR_SPEED=500                           #注ぐ速度
 readonly MOVE_SPEED=$((MIN_W_MUG / 3 * 2))        #ビールジョッキ登場スピード
-readonly UP="\033[1A"                             #カーソル上
-readonly DOWN="\033[1B"                           #カーソル下
-readonly RIGHT="\033[1C"                          #カーソル右
-readonly LEFT="\033[1D"                           #カーソル左
+
+readonly YELLOW="\033[33m" #黄色
+readonly BLUE="\033[34m"   #黄色
+readonly WHITE="\033[37m"  #白色
+readonly RESET="\033[0m"   #リセット
+readonly UP="\033[1A"      #カーソル上
+readonly DOWN="\033[1B"    #カーソル下
+readonly RIGHT="\033[1C"   #カーソル右
+readonly LEFT="\033[1D"    #カーソル左
 
 #ビールジョッキの横幅
 function get_beer_w() {
   local h=$1                            #ある高さ
   local w=$((h * 60 / 100 + MIN_W_MUG)) #その時の横幅
-  #local w=$((-20 / (h + 1) * 60 / 100 + MIN_W_MUG))
   if ((w % 2 == 1)); then
     #奇数だとズレちゃう
     w=$((w + 1))
@@ -28,21 +28,45 @@ function get_beer_w() {
   echo "$w"
 }
 
+WS_MUG=()
+for ((i = 0; i < H_MUG; i++)); do
+  WS_MUG[i]=$(get_beer_w "$i")
+done
+
+MUG_LINES=()
+W_BASE=$((H_MUG * 60 / 100 + MIN_W_MUG)) # 1番広い幅
+if ((W_BASE % 2 == 1)); then
+  W_BASE=$((W_BASE + 1))
+fi
+
+for ((i = 0; i < H_MUG; i++)); do
+  w_current=${WS_MUG[i]}
+  indent=$(((W_BASE - w_current) / 2))
+  line=$(printf "%${indent}s" "") #左インデント
+  if ((i == 0)); then
+    line+=$(printf "%${w_current}s" "" | tr ' ' '█')
+  else
+    inner_w=$((w_current - 2))
+    line+="█"$(printf "%${inner_w}s" "")"█"
+  fi
+  MUG_LINES[$i]="$line"
+done
+
 #ジョッキの描画
 function draw_mug() {
-  local x=$1
-  local y0=$2
+  local x_left=$1 #左端の位置
+  local y0=$2     #底の位置
   buffer="${BLUE}\033[H"
   for ((i = 0; i < H_MUG; i++)); do
     full_line="${MUG_LINES[i]}"
     y=$((y0 - i))
-    if ((x < 1)); then
-      offset=$((1 - x))
+    if ((x_left < 1)); then
+      offset=$((1 - x_left))
       draw_line="${full_line:$offset}"
       draw_x=1
     else
       draw_line="$full_line"
-      draw_x=$x
+      draw_x=$x_left
     fi
     # \033[Kは行末までクリア、\033[y;xHは座標指定
     buffer+="\033[${y};1H\033[K\033[${y};${draw_x}H${draw_line}"
@@ -73,37 +97,14 @@ function draw_spout() {
   fi
 }
 
-WS_MUG=()
-for ((i = 0; i < H_MUG; i++)); do
-  WS_MUG[i]=$(get_beer_w "$i")
-done
-
+##########################################
+# 初期
+##########################################
 tput clear #画面をクリア
 tput civis #カーソル消す
-printf "\\$(printf '%03o' $((33 + RANDOM % 94)))\n"
-MUG_LINES=()
-W_BASE=$((H_MUG * 60 / 100 + MIN_W_MUG)) # 1番広い幅
-if ((W_BASE % 2 == 1)); then
-  W_BASE=$((W_BASE + 1))
-fi
-
-for ((i = 0; i < H_MUG; i++)); do
-  w_current=${WS_MUG[i]}
-  indent=$(((W_BASE - w_current) / 2))
-  line=$(printf "%${indent}s" "") #左インデント
-  if ((i == 0)); then
-    line+=$(printf "%${w_current}s" "" | tr ' ' '█')
-  else
-    inner_w=$((w_current - 2))
-    line+="█"$(printf "%${inner_w}s" "")"█"
-  fi
-  MUG_LINES[$i]="$line"
-done
 
 ##########################################
-##########################################
-# ビールジョッキを左から登場させる       #
-##########################################
+# ビールジョッキを左から登場させる  
 ##########################################
 x0=0                                                                  # 基準
 y0=$Y_BOTTOM                                                          # 基準
@@ -123,6 +124,7 @@ total_time=5
 bottom_frame=30
 num_frame=60
 draw_spout $offset_x $offset_y 1 #最後の引数は描画するか、クリアするかのフラグ
+draw_mug $((MOVE_SPEED - 1)) $y0 # ビールの描画
 for ((f = 0; f < $((total_time * num_frame)); f++)); do
   bottom_beer=$((offset_y - (H_MUG - 3) * f / bottom_frame)) #注がれるビールの液面
   if ((bottom_beer <= $((offset_y - H_MUG - 3)))); then
@@ -131,7 +133,6 @@ for ((f = 0; f < $((total_time * num_frame)); f++)); do
     if ((current_height > H_MUG)); then
       current_height=H_MUG
       #注ぎを消す
-      # 注ぎ口の描画
       tput cup $((offset_y + 1)) $offset_mug_x
       line="${YELLOW}"
       for ((o = 0; o < MOVE_SPEED; o++)); do
@@ -150,11 +151,11 @@ for ((f = 0; f < $((total_time * num_frame)); f++)); do
       echo -ne "$line"
     fi
     beer=""
-    tput cup $((Y_BOTTOM - 2)) $MOVE_SPEED
+    tput cup $((Y_BOTTOM - 2)) $((MOVE_SPEED - 1))
     for ((h = 1; h < current_height; h++)); do
+      offset_beer_x=$(((WS_MUG[H_MUG - 1] - WS_MUG[h]) / 2))
       if ((h <= H_MUG - 5)); then
         #上から3つは泡にしたい
-        offset_beer_x=$(((WS_MUG[H_MUG - 1] - WS_MUG[h]) / 2))
         for ((w = 0; w < offset_beer_x; w++)); do
           beer+="${RIGHT}"
         done
@@ -175,7 +176,6 @@ for ((f = 0; f < $((total_time * num_frame)); f++)); do
           beer+="${LEFT}"
         done
       else
-        offset_beer_x=$(((WS_MUG[H_MUG - 1] - WS_MUG[h]) / 2))
         for ((w = 0; w < offset_beer_x; w++)); do
           beer+="${RIGHT}"
         done
